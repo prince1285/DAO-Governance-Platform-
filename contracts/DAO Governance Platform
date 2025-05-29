@@ -1,1 +1,216 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.19;
 
+/**
+ * @title DAO Governance Platform
+ * @dev A decentralized autonomous organization governance smart contract
+ * @author Your Name
+ */
+contract Project {
+    // Struct to represent a proposal
+    struct Proposal {
+        uint256 id;
+        string title;
+        string description;
+        address proposer;
+        uint256 votesFor;
+        uint256 votesAgainst;
+        uint256 deadline;
+        bool executed;
+        bool exists;
+        mapping(address => bool) hasVoted;
+    }
+    
+    // State variables
+    address public owner;
+    uint256 public proposalCount;
+    uint256 public constant VOTING_PERIOD = 7 days;
+    uint256 public constant MIN_VOTES_REQUIRED = 10;
+    
+    // Mappings
+    mapping(uint256 => Proposal) public proposals;
+    mapping(address => bool) public members;
+    mapping(address => uint256) public membershipTimestamp;
+    
+    // Events
+    event ProposalCreated(uint256 indexed proposalId, string title, address indexed proposer);
+    event VoteCast(uint256 indexed proposalId, address indexed voter, bool support);
+    event ProposalExecuted(uint256 indexed proposalId, bool passed);
+    event MemberAdded(address indexed member);
+    
+    // Modifiers
+    modifier onlyOwner() {
+        require(msg.sender == owner, "Only owner can call this function");
+        _;
+    }
+    
+    modifier onlyMember() {
+        require(members[msg.sender], "Only DAO members can call this function");
+        _;
+    }
+    
+    modifier proposalExists(uint256 _proposalId) {
+        require(proposals[_proposalId].exists, "Proposal does not exist");
+        _;
+    }
+    
+    /**
+     * @dev Constructor sets the contract deployer as owner
+     */
+    constructor() {
+        owner = msg.sender;
+        members[msg.sender] = true;
+        membershipTimestamp[msg.sender] = block.timestamp;
+        emit MemberAdded(msg.sender);
+    }
+    
+    /**
+     * @dev Core Function 1: Create a new proposal
+     * @param _title The title of the proposal
+     * @param _description Detailed description of the proposal
+     */
+    function createProposal(string memory _title, string memory _description) 
+        external 
+        onlyMember 
+        returns (uint256) 
+    {
+        require(bytes(_title).length > 0, "Title cannot be empty");
+        require(bytes(_description).length > 0, "Description cannot be empty");
+        
+        proposalCount++;
+        uint256 proposalId = proposalCount;
+        
+        Proposal storage newProposal = proposals[proposalId];
+        newProposal.id = proposalId;
+        newProposal.title = _title;
+        newProposal.description = _description;
+        newProposal.proposer = msg.sender;
+        newProposal.votesFor = 0;
+        newProposal.votesAgainst = 0;
+        newProposal.deadline = block.timestamp + VOTING_PERIOD;
+        newProposal.executed = false;
+        newProposal.exists = true;
+        
+        emit ProposalCreated(proposalId, _title, msg.sender);
+        return proposalId;
+    }
+    
+    /**
+     * @dev Core Function 2: Vote on a proposal
+     * @param _proposalId The ID of the proposal to vote on
+     * @param _support True for yes, false for no
+     */
+    function vote(uint256 _proposalId, bool _support) 
+        external 
+        onlyMember 
+        proposalExists(_proposalId) 
+    {
+        Proposal storage proposal = proposals[_proposalId];
+        
+        require(block.timestamp < proposal.deadline, "Voting period has ended");
+        require(!proposal.hasVoted[msg.sender], "Member has already voted");
+        require(!proposal.executed, "Proposal has already been executed");
+        
+        proposal.hasVoted[msg.sender] = true;
+        
+        if (_support) {
+            proposal.votesFor++;
+        } else {
+            proposal.votesAgainst++;
+        }
+        
+        emit VoteCast(_proposalId, msg.sender, _support);
+    }
+    
+    /**
+     * @dev Core Function 3: Execute a proposal after voting period
+     * @param _proposalId The ID of the proposal to execute
+     */
+    function executeProposal(uint256 _proposalId) 
+        external 
+        proposalExists(_proposalId) 
+    {
+        Proposal storage proposal = proposals[_proposalId];
+        
+        require(block.timestamp >= proposal.deadline, "Voting period is still active");
+        require(!proposal.executed, "Proposal has already been executed");
+        require(
+            proposal.votesFor + proposal.votesAgainst >= MIN_VOTES_REQUIRED, 
+            "Not enough votes to execute proposal"
+        );
+        
+        proposal.executed = true;
+        bool passed = proposal.votesFor > proposal.votesAgainst;
+        
+        emit ProposalExecuted(_proposalId, passed);
+    }
+    
+    /**
+     * @dev Add a new member to the DAO
+     * @param _member Address of the new member
+     */
+    function addMember(address _member) external onlyOwner {
+        require(_member != address(0), "Invalid address");
+        require(!members[_member], "Address is already a member");
+        
+        members[_member] = true;
+        membershipTimestamp[_member] = block.timestamp;
+        emit MemberAdded(_member);
+    }
+    
+    /**
+     * @dev Get proposal details
+     * @param _proposalId The ID of the proposal
+     * @return id, title, description, proposer, votesFor, votesAgainst, deadline, executed
+     */
+    function getProposal(uint256 _proposalId) 
+        external 
+        view 
+        proposalExists(_proposalId) 
+        returns (
+            uint256 id,
+            string memory title,
+            string memory description,
+            address proposer,
+            uint256 votesFor,
+            uint256 votesAgainst,
+            uint256 deadline,
+            bool executed
+        ) 
+    {
+        Proposal storage proposal = proposals[_proposalId];
+        return (
+            proposal.id,
+            proposal.title,
+            proposal.description,
+            proposal.proposer,
+            proposal.votesFor,
+            proposal.votesAgainst,
+            proposal.deadline,
+            proposal.executed
+        );
+    }
+    
+    /**
+     * @dev Check if an address has voted on a specific proposal
+     * @param _proposalId The ID of the proposal
+     * @param _voter The address to check
+     * @return bool indicating if the address has voted
+     */
+    function hasVoted(uint256 _proposalId, address _voter) 
+        external 
+        view 
+        proposalExists(_proposalId) 
+        returns (bool) 
+    {
+        return proposals[_proposalId].hasVoted[_voter];
+    }
+    
+    /**
+     * @dev Get the total number of DAO members (approximate)
+     * @return The current proposal count (can be used to estimate activity)
+     */
+    function getTotalProposals() external view returns (uint256) {
+        return proposalCount;
+    }
+}
